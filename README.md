@@ -5,6 +5,22 @@ Shows Google Analytics (GA4) data to editors inside CloudCannon, without exposin
 - **Per-page pop-up**: a collapsible panel in the bottom-left corner of every page opened in the Visual Editor. It shows that page's views, users, average engagement time, bounce rate, a daily trend and top sources.
 - **Dashboard**: `/analytics/`, opened from **Insights → Analytics** in the CloudCannon sidebar. It shows site totals, a daily trend, top pages, channels, devices and a table of every page.
 
+## Screenshots
+
+The screenshots show mock data.
+
+The **Insights → Analytics** entry in the CloudCannon sidebar:
+
+![The Analytics collection under Insights in the CloudCannon sidebar](docs/screenshots/sidebar.png)
+
+The dashboard, open in the Visual Editor:
+
+![The /analytics/ dashboard in the Visual Editor, with totals and a daily page views chart](docs/screenshots/dashboard.png)
+
+The pop-up on a page open in the Visual Editor:
+
+![The per-page analytics pop-up over the About page in the Visual Editor](docs/screenshots/popup.png)
+
 ## How it works
 
 CloudCannon environment variables exist only during the build. Nothing in the Visual Editor can read them, and CloudCannon hosting runs no server-side code. So the GA credentials are used at build time and never reach the browser.
@@ -26,15 +42,15 @@ The pop-up only reads data, so it needs no Visual Editor API calls. The **Insigh
 
 ## Files
 
-| File | Role |
-| --- | --- |
-| `src/lib/analytics.ts` | Fetches the GA4 report at build time, or generates mock data |
-| `src/pages/analytics/[...path].astro` | The `/analytics/` dashboard |
-| `src/pages/analytics/[file].json.ts` | `/analytics/pages.json`, the pop-up's data |
-| `src/scripts/analytics-panel.ts` | The editor-only pop-up, with no dependencies |
-| `src/layouts/Layout.astro` | Loads the pop-up in the Visual Editor, and the gtag snippet on production |
-| `astro.config.mjs` | Declares the environment variables, and marks `GA_CREDENTIALS` as secret |
-| `cloudcannon.config.yml`, `analytics/index.md` | The **Insights → Analytics** sidebar entry |
+| File                                           | Role                                                                      |
+| ---------------------------------------------- | ------------------------------------------------------------------------- |
+| `src/lib/analytics.ts`                         | Fetches the GA4 report at build time, or generates mock data              |
+| `src/pages/analytics/[...path].astro`          | The `/analytics/` dashboard                                               |
+| `src/pages/analytics/[file].json.ts`           | `/analytics/pages.json`, the pop-up's data                                |
+| `src/scripts/analytics-panel.ts`               | The editor-only pop-up, with no dependencies                              |
+| `src/layouts/Layout.astro`                     | Loads the pop-up in the Visual Editor, and the gtag snippet on production |
+| `astro.config.mjs`                             | Declares the environment variables, and marks `GA_CREDENTIALS` as secret  |
+| `cloudcannon.config.yml`, `analytics/index.md` | The **Insights → Analytics** sidebar entry                                |
 
 ## Setup
 
@@ -90,11 +106,11 @@ The key file contains a private key, so treat it like a password. Never commit i
 
 2. On the staging site, go to **Site Settings → Build configuration → Environment Variables** and add:
 
-   | Key                 | Value                                  |
-   | ------------------- | -------------------------------------- |
-   | `ANALYTICS_ENABLED` | `true`                                 |
-   | `GA_PROPERTY_ID`    | The numeric property ID from step 2    |
-   | `GA_CREDENTIALS`    | The base64 key (raw JSON also works)   |
+   | Key                 | Value                                |
+   | ------------------- | ------------------------------------ |
+   | `ANALYTICS_ENABLED` | `true`                               |
+   | `GA_PROPERTY_ID`    | The numeric property ID from step 2  |
+   | `GA_CREDENTIALS`    | The base64 key (raw JSON also works) |
 
 3. Wait until GA has collected at least a day of data. A new property shows nothing for 24–48 hours.
 4. Rebuild staging.
@@ -169,4 +185,4 @@ cloudcannon dev dist
 - Standard GA4 and the GA4 Data API are free. The Data API has daily quotas per property instead of billing, and each staging build makes six requests. Only calls signed with your service account key count toward the quota.
 - Any site can send hits with your measurement ID, which adds junk to the data but can't cost money. Every hit records the domain it came from in the `hostName` dimension, which you can filter on in GA reports.
 - The data only refreshes when staging rebuilds.
-- The **Insights → Analytics** sidebar entry also appears on production, because `cloudcannon.config.yml` is shared across branches. There it opens a 404.
+- The **Insights → Analytics** sidebar entry also appears on production, because `cloudcannon.config.yml` is shared across branches. There it shows a `No Preview Available` and won't open, because no `/analytics/` page builds on production.
