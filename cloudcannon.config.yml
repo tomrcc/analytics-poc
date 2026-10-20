@@ -133,6 +133,16 @@ collections_config:
         options:
           values: data.tags
           empty_type: array
+  analytics:
+    # Opens /analytics/ in the Visual Editor. The page only exists on builds with ANALYTICS_ENABLED.
+    path: analytics
+    url: /analytics/
+    icon: query_stats
+    _enabled_editors:
+      - visual
+    disable_add: true
+    disable_add_folder: true
+    disable_file_actions: true
   data:
     path: data
     disable_url: true
@@ -170,6 +180,9 @@ collection_groups:
   - heading: Data
     collections:
       - data
+  - heading: Insights
+    collections:
+      - analytics
 
 data_config:
   tags:

@@ -82,6 +82,9 @@ const canonicalURL = new URL(seo?.canonical_url ?? Astro.url.pathname, baseUrl);
         import("../scripts/register-components.ts").catch((error) => {
           console.warn("Failed to load CloudCannon component registration:", error);
         });
+        import("../scripts/analytics-panel.ts").catch((error) => {
+          console.warn("Failed to load the analytics panel:", error);
+        });
       }
     </script>
   </body>

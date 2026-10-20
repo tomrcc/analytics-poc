@@ -149,6 +149,49 @@ Three page-building components are included:
 - **Blog posts** are in `src/content/blog/` as MDX files
 - **Data** files (site settings, navigation) are in `data/`
 
+## Analytics in the Visual Editor (PoC)
+
+Editors see site analytics inside CloudCannon in two places. Customers never see either.
+
+- **Per-page pop-up**: a collapsible panel in the bottom-left corner of every page opened in the Visual Editor. It shows that page's views, users, engagement, bounce rate, a daily trend and top sources.
+- **Dashboard**: `/analytics/`, opened from **Insights → Analytics** in the CloudCannon sidebar. It shows site totals, a daily trend, top pages, channels, devices and a table of every page.
+
+### How it works
+
+CloudCannon environment variables exist only during the build. The Visual Editor API has no way to read them, and CloudCannon hosting runs no server-side code. So the analytics token is used at build time and never reaches the browser:
+
+1. When `ANALYTICS_ENABLED` is set, the build fetches a 28-day GA4 snapshot (`src/lib/analytics.ts`).
+2. The build writes the snapshot as the `/analytics/` page and `/analytics/pages.json`. Both contain aggregated numbers only.
+3. `src/scripts/analytics-panel.ts` loads only when `window.inEditorMode` is set. It reads `/analytics/pages.json` and renders the pop-up for the current path. If the file is missing, it renders nothing.
+4. Without `ANALYTICS_ENABLED`, the build emits neither file, and `/analytics/` returns a 404.
+
+Data is as fresh as the last build. Rebuild the staging site to refresh it.
+
+### Environment variables
+
+Set these on the staging site only, in **Site Settings → Build configuration → Environment Variables**:
+
+| Key | Value |
+| --- | --- |
+| `ANALYTICS_ENABLED` | `true` |
+| `GA_PROPERTY_ID` | The numeric GA4 property ID |
+| `GA_CREDENTIALS` | A Google Cloud service account's JSON key, raw or base64 (`base64 -i key.json`) |
+
+The service account needs the **Viewer** role on the GA4 property (**GA Admin → Property access management**), and the Google Analytics Data API enabled in its Cloud project. With `ANALYTICS_ENABLED` set but no credentials, the build uses mock data and labels it "Mock data".
+
+To try it locally with mock data:
+
+```bash
+ANALYTICS_ENABLED=true npm run build
+```
+
+### CloudCannon setup
+
+- **Staging site:** set the environment variables above, and protect the whole site in **Site Settings → Authentication** (CloudCannon or Password).
+- **Production site:** no analytics environment variables. A site branched from staging copies its configuration, so remove them there.
+
+The **Insights → Analytics** sidebar entry also appears on production, because `cloudcannon.config.yml` is shared across branches. There it opens a 404.
+
 ## Project Structure
 
 ```

@@ -1,4 +1,4 @@
-import { defineConfig } from "astro/config";
+import { defineConfig, envField } from "astro/config";
 import react from "@astrojs/react";
 import editableRegions from "@cloudcannon/editable-regions/astro-integration";
 import mdx from "@astrojs/mdx";
@@ -13,6 +13,15 @@ export default defineConfig({
     dangerouslyProcessSVG: true,
   },
   compressHTML: true,
+  // Set only on the staging site. Without ANALYTICS_ENABLED no analytics output is built.
+  env: {
+    schema: {
+      ANALYTICS_ENABLED: envField.boolean({ context: "server", access: "public", default: false }),
+      GA_PROPERTY_ID: envField.string({ context: "server", access: "secret", optional: true }),
+      // Service account JSON, raw or base64.
+      GA_CREDENTIALS: envField.string({ context: "server", access: "secret", optional: true }),
+    },
+  },
   vite: {
     plugins: [tailwindcss()],
   },

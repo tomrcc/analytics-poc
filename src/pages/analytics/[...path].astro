@@ -1,0 +1,255 @@
+---
+import Layout from "../../layouts/Layout.astro";
+import { getAnalyticsReport, isAnalyticsEnabled, type NamedValue } from "../../lib/analytics";
+
+// Builds /analytics/ only when analytics is enabled, so prod has no page at all.
+export function getStaticPaths() {
+  return isAnalyticsEnabled() ? [{ params: { path: undefined } }] : [];
+}
+
+const report = await getAnalyticsReport();
+
+const compact = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
+const whole = new Intl.NumberFormat("en");
+const duration = (s: number) => (s >= 60 ? `${Math.floor(s / 60)}m ${Math.round(s % 60)}s` : `${Math.round(s)}s`);
+const percent = (n: number) => `${Math.round(n * 100)}%`;
+const shortDate = (iso: string) =>
+  new Date(`${iso}T00:00:00Z`).toLocaleDateString("en", { day: "numeric", month: "short", timeZone: "UTC" });
+
+const tiles = [
+  { label: "Users", value: compact.format(report.totals.users) },
+  { label: "Sessions", value: compact.format(report.totals.sessions) },
+  { label: "Page views", value: compact.format(report.totals.views) },
+  { label: "Avg engagement", value: duration(report.totals.engagementSeconds) },
+];
+
+// Trend chart geometry, in viewBox units.
+const W = 800, H = 240, padL = 44, padR = 12, padT = 12, padB = 28;
+const points = report.daily;
+const maxViews = Math.max(1, ...points.map((p) => p.views));
+const step = 10 ** Math.floor(Math.log10(maxViews / 3));
+const tick = [1, 2, 5, 10].map((m) => m * step).find((t) => maxViews / t <= 4) ?? step * 10;
+const yMax = Math.ceil(maxViews / tick) * tick;
+const yTicks = Array.from({ length: Math.round(yMax / tick) + 1 }, (_, i) => i * tick);
+const x = (i: number) => padL + (i * (W - padL - padR)) / Math.max(1, points.length - 1);
+const y = (v: number) => padT + (1 - v / yMax) * (H - padT - padB);
+const linePath = points.map((p, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(p.views).toFixed(1)}`).join("");
+const areaPath = `${linePath}L${x(points.length - 1).toFixed(1)},${y(0)}L${x(0).toFixed(1)},${y(0)}Z`;
+const xLabelIdx = [0, Math.floor((points.length - 1) / 2), points.length - 1];
+
+const pageRows = Object.entries(report.pages)
+  .map(([path, stats]) => ({ path, ...stats }))
+  .sort((a, b) => b.views - a.views);
+const topPages: NamedValue[] = pageRows.slice(0, 8).map((p) => ({ name: p.path, value: p.views }));
+
+const barLists = [
+  { title: "Top pages", unit: "views", items: topPages, link: true },
+  { title: "Channels", unit: "users", items: report.channels, link: false },
+  { title: "Devices", unit: "users", items: report.devices, link: false },
+];
+---
+
+<Layout
+  title="Analytics"
+  seo={{
+    no_index: true,
+    page_description: null,
+    featured_image: null,
+    featured_image_alt: null,
+    canonical_url: null,
+    open_graph_type: null,
+    author_twitter_handle: null,
+  }}
+>
+  <div class="analytics mx-auto max-w-6xl px-4 sm:px-8 py-10">
+    <header class="mb-8 flex flex-wrap items-end justify-between gap-4">
+      <div>
+        <h1 class="text-3xl font-medium">Analytics</h1>
+        <p class="mt-1 text-gray-600">
+          Last {report.range.days} days ({shortDate(report.range.start)} – {shortDate(report.range.end)}) ·
+          snapshot from {new Date(report.generatedAt).toLocaleString("en-NZ", { timeZone: "Pacific/Auckland" })}, rebuild to refresh
+        </p>
+      </div>
+      {report.source === "mock" && (
+        <span class="rounded-full bg-amber-100 px-3 py-1 text-sm font-medium text-amber-900">Mock data</span>
+      )}
+    </header>
+
+    <section class="grid grid-cols-2 gap-4 lg:grid-cols-4" aria-label="Totals">
+      {tiles.map((t) => (
+        <div class="rounded-lg border border-gray-200 p-4">
+          <p class="text-sm text-gray-600">{t.label}</p>
+          <p class="mt-1 text-3xl font-semibold tabular-nums">{t.value}</p>
+        </div>
+      ))}
+    </section>
+
+    <section class="mt-8 rounded-lg border border-gray-200 p-4">
+      <h2 class="mb-3 font-medium">Page views per day</h2>
+      <div class="trend relative" data-points={JSON.stringify(points.map((p) => [shortDate(p.date), p.views]))}>
+        <svg
+          viewBox={`0 0 ${W} ${H}`}
+          class="block h-auto w-full touch-none outline-none"
+          role="img"
+          aria-label={`Page views per day, peaking at ${whole.format(maxViews)}`}
+          tabindex="0"
+        >
+          {yTicks.map((t) => (
+            <g>
+              <line x1={padL} x2={W - padR} y1={y(t)} y2={y(t)} class="grid-line" />
+              <text x={padL - 8} y={y(t)} dy="0.32em" text-anchor="end" class="axis-label">{compact.format(t)}</text>
+            </g>
+          ))}
+          {xLabelIdx.map((i, n) => (
+            <text x={x(i)} y={H - 8} text-anchor={["start", "middle", "end"][n]} class="axis-label">
+              {shortDate(points[i].date)}
+            </text>
+          ))}
+          <path d={areaPath} class="series-area" />
+          <path d={linePath} class="series-line" />
+          <line class="crosshair" y1={padT} y2={y(0)} visibility="hidden" />
+          <circle class="crosshair-dot" r="4" visibility="hidden" />
+          <rect class="hit" x={padL} y={padT} width={W - padL - padR} height={H - padT - padB} fill="transparent" />
+        </svg>
+        <div class="trend-tip" hidden></div>
+      </div>
+    </section>
+
+    <section class="mt-8 grid gap-4 lg:grid-cols-3">
+      {barLists.map((list) => {
+        const max = Math.max(1, ...list.items.map((i) => i.value));
+        return (
+          <div class="rounded-lg border border-gray-200 p-4">
+            <h2 class="mb-3 font-medium">
+              {list.title} <span class="text-sm font-normal text-gray-500">by {list.unit}</span>
+            </h2>
+            <ol class="space-y-2">
+              {list.items.map((item) => (
+                <li>
+                  <div class="flex justify-between gap-3 text-sm">
+                    {list.link ? (
+                      <a class="truncate text-gray-800 underline-offset-2 hover:underline" href={item.name}>{item.name}</a>
+                    ) : (
+                      <span class="truncate capitalize text-gray-800">{item.name}</span>
+                    )}
+                    <span class="tabular-nums text-gray-600">{whole.format(item.value)}</span>
+                  </div>
+                  <div class="bar-track mt-1"><div class="bar" style={`width: ${(item.value / max) * 100}%`}></div></div>
+                </li>
+              ))}
+            </ol>
+          </div>
+        );
+      })}
+    </section>
+
+    <section class="mt-8 rounded-lg border border-gray-200 p-4">
+      <h2 class="mb-3 font-medium">All pages</h2>
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-sm">
+          <thead class="text-gray-600">
+            <tr class="border-b border-gray-200">
+              <th class="py-2 pr-4 font-medium">Page</th>
+              <th class="py-2 pr-4 text-right font-medium">Views</th>
+              <th class="py-2 pr-4 text-right font-medium">Users</th>
+              <th class="py-2 pr-4 text-right font-medium">Avg engagement</th>
+              <th class="py-2 text-right font-medium">Bounce rate</th>
+            </tr>
+          </thead>
+          <tbody class="tabular-nums">
+            {pageRows.map((p) => (
+              <tr class="border-b border-gray-100">
+                <td class="py-2 pr-4"><a class="underline-offset-2 hover:underline" href={p.path}>{p.path}</a></td>
+                <td class="py-2 pr-4 text-right">{whole.format(p.views)}</td>
+                <td class="py-2 pr-4 text-right">{whole.format(p.users)}</td>
+                <td class="py-2 pr-4 text-right">{duration(p.engagementSeconds)}</td>
+                <td class="py-2 text-right">{percent(p.bounceRate)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+</Layout>
+
+<style>
+  .analytics {
+    --series-1: #2a78d6;
+    --grid: #e5e7eb;
+    --axis-text: #6b7280;
+  }
+  .grid-line { stroke: var(--grid); stroke-width: 1; }
+  .axis-label { fill: var(--axis-text); font-size: 12px; }
+  .series-line { fill: none; stroke: var(--series-1); stroke-width: 2; stroke-linejoin: round; }
+  .series-area { fill: var(--series-1); opacity: 0.1; }
+  .crosshair { stroke: #9ca3af; stroke-width: 1; }
+  .crosshair-dot { fill: var(--series-1); stroke: #fff; stroke-width: 2; }
+  .trend-tip {
+    position: absolute;
+    top: 0;
+    pointer-events: none;
+    transform: translateX(-50%);
+    background: #111827;
+    color: #fff;
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  .trend-tip :global(strong) { font-size: 14px; }
+  .bar-track { height: 6px; border-radius: 4px; background: #f3f4f6; }
+  .bar { height: 100%; border-radius: 4px; background: var(--series-1); }
+</style>
+
+<script>
+  for (const root of document.querySelectorAll<HTMLElement>(".trend")) {
+    const points: [string, number][] = JSON.parse(root.dataset.points ?? "[]");
+    const svg = root.querySelector("svg")!;
+    const hit = svg.querySelector<SVGRectElement>(".hit")!;
+    const line = svg.querySelector<SVGLineElement>(".crosshair")!;
+    const dot = svg.querySelector<SVGCircleElement>(".crosshair-dot")!;
+    const tip = root.querySelector<HTMLElement>(".trend-tip")!;
+    const pathEl = svg.querySelector<SVGPathElement>(".series-line")!;
+    const coords = (pathEl.getAttribute("d") ?? "")
+      .split(/[ML]/)
+      .filter(Boolean)
+      .map((pair) => pair.split(",").map(Number));
+    let index = -1;
+
+    const show = (i: number) => {
+      index = Math.max(0, Math.min(points.length - 1, i));
+      const [cx, cy] = coords[index];
+      line.setAttribute("x1", String(cx));
+      line.setAttribute("x2", String(cx));
+      dot.setAttribute("cx", String(cx));
+      dot.setAttribute("cy", String(cy));
+      line.setAttribute("visibility", "visible");
+      dot.setAttribute("visibility", "visible");
+      const [label, value] = points[index];
+      tip.replaceChildren();
+      const strong = document.createElement("strong");
+      strong.textContent = value.toLocaleString("en");
+      tip.append(strong, document.createTextNode(` views · ${label}`));
+      tip.style.left = `${(cx / svg.viewBox.baseVal.width) * 100}%`;
+      tip.hidden = false;
+    };
+    const hide = () => {
+      line.setAttribute("visibility", "hidden");
+      dot.setAttribute("visibility", "hidden");
+      tip.hidden = true;
+    };
+
+    hit.addEventListener("pointermove", (event) => {
+      const box = hit.getBoundingClientRect();
+      const ratio = (event.clientX - box.left) / box.width;
+      show(Math.round(ratio * (points.length - 1)));
+    });
+    hit.addEventListener("pointerleave", hide);
+    svg.addEventListener("blur", hide);
+    svg.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowRight") show(index + 1);
+      else if (event.key === "ArrowLeft") show(index < 0 ? points.length - 1 : index - 1);
+    });
+  }
+</script>

@@ -14,6 +14,7 @@
     "@astrojs/react": "^6.0.5",
     "@astrojs/rss": "^4.0.19",
     "@cloudcannon/editable-regions": "^0.0.19",
+    "@google-analytics/data": "^7.3.0",
     "@tailwindcss/vite": "^4.3.3",
     "@types/markdown-it": "^14.2.0",
     "@types/react": "^19.3.0",
