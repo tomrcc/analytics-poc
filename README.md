@@ -1,221 +1,172 @@
-# Astro Minimal Starter
+# Analytics in CloudCannon's Visual Editor (PoC)
 
-A minimal starter template for building an Astro site with [CloudCannon](https://cloudcannon.com/) using **Editable Regions** for visual editing.
+Shows Google Analytics (GA4) data to editors inside CloudCannon, without exposing it or the GA credentials to site visitors.
 
-See a [demo site](https://tiny-jackal.cloudvent.net/).
+- **Per-page pop-up**: a collapsible panel in the bottom-left corner of every page opened in the Visual Editor. It shows that page's views, users, average engagement time, bounce rate, a daily trend and top sources.
+- **Dashboard**: `/analytics/`, opened from **Insights → Analytics** in the CloudCannon sidebar. It shows site totals, a daily trend, top pages, channels, devices and a table of every page.
 
-## Features
+## How it works
 
-- Visual editing with [Editable Regions](https://cloudcannon.com/documentation/developer-guides/set-up-visual-editing/an-overview-of-editable-regions/) (text, image, array, source, and component regions)
-- Page building with reusable components
-- Blog with pagination and tags
-- [Tailwind CSS v4](https://tailwindcss.com/) with CSS-first configuration
-- SEO controls
-- Pagefind search
+CloudCannon environment variables exist only during the build. Nothing in the Visual Editor can read them, and CloudCannon hosting runs no server-side code. So the GA credentials are used at build time and never reach the browser.
 
-## Getting Started
+The setup uses two CloudCannon sites from the same repository:
 
-Click `Use this template` to make your own copy of the repository.
+- **Production** carries the GA4 tracking tag and collects visits. It builds no analytics pages.
+- **Staging** reads the collected data from the GA4 Data API during its build and writes a snapshot. Editors work here, and the whole site sits behind CloudCannon authentication.
 
-### Prerequisites
+On a build with `ANALYTICS_ENABLED`:
 
-Node.js 24 is recommended — the [CloudCannon CLI](https://cloudcannon.com/documentation/developer-reference/cli/) requires it.
+1. `src/lib/analytics.ts` fetches the last 28 days (ending yesterday) from the GA4 Data API, signed in as a Google Cloud service account.
+2. `src/pages/analytics/[...path].astro` renders the snapshot as the `/analytics/` dashboard, and `src/pages/analytics/[file].json.ts` writes per-page numbers to `/analytics/pages.json`. Both contain aggregated numbers only.
+3. `src/scripts/analytics-panel.ts` loads only when `window.inEditorMode` is set, which CloudCannon does inside the Visual Editor. It reads `/analytics/pages.json` and shows the numbers for the current path. If the file is missing, it shows nothing.
 
-### Local Development
+Without `ANALYTICS_ENABLED`, neither file is built and `/analytics/` returns a 404. The data is as fresh as the last staging build.
 
-1. Clone the repository to your local machine.
+The pop-up only reads data, so it needs no Visual Editor API calls. The **Insights → Analytics** sidebar entry comes from the `analytics` collection in `cloudcannon.config.yml`, which points at the stub file `analytics/index.md`.
 
-2. Start the development server.
+## Files
+
+| File | Role |
+| --- | --- |
+| `src/lib/analytics.ts` | Fetches the GA4 report at build time, or generates mock data |
+| `src/pages/analytics/[...path].astro` | The `/analytics/` dashboard |
+| `src/pages/analytics/[file].json.ts` | `/analytics/pages.json`, the pop-up's data |
+| `src/scripts/analytics-panel.ts` | The editor-only pop-up, with no dependencies |
+| `src/layouts/Layout.astro` | Loads the pop-up in the Visual Editor, and the gtag snippet on production |
+| `astro.config.mjs` | Declares the environment variables, and marks `GA_CREDENTIALS` as secret |
+| `cloudcannon.config.yml`, `analytics/index.md` | The **Insights → Analytics** sidebar entry |
+
+## Setup
+
+You need a CloudCannon account, a Google account with access to Google Analytics, and access to Google Cloud.
+
+### 1. Create the CloudCannon sites
+
+1. Create the production site from this repository's main branch.
+2. Create the staging site from a separate branch of the same repository.
+3. On the staging site, go to **Site Settings → Authentication** and choose **CloudCannon** or **Password**, so the dashboard and `pages.json` stay private.
+
+The Visual Editor keeps working behind staging authentication.
+
+### 2. Create the GA4 property
+
+1. In [Google Analytics](https://analytics.google.com), open an account, or create one. Then go to **Admin → Create → Property**.
+2. Add a **Web** data stream for the production URL, with **Enhanced measurement** left on.
+3. Note the **measurement ID** (`G-XXXXXXXXXX`), shown on the data stream.
+4. Note the numeric **property ID**, shown in **Admin → Property details**. The two IDs are easy to mix up: the measurement ID is for tracking, the property ID is for reading.
+5. Leave **Google signals** off (**Admin → Data collection**). With it on, GA hides small numbers in reports, which leaves gaps on low-traffic sites.
+
+The PoC uses only the dimensions and metrics GA4 collects by default, so the property needs no custom events or custom dimensions.
+
+### 3. Track production
+
+1. On the production site, go to **Site Settings → Build configuration → Environment Variables**. Add `GA_MEASUREMENT_ID` with the `G-` ID, then rebuild.
+2. Open the live site in a normal browser tab. Your visit should appear in GA under **Reports → Realtime** within a minute or so.
+
+`src/layouts/Layout.astro` adds the gtag snippet only when `GA_MEASUREMENT_ID` is set. The snippet skips the Visual Editor, which can load production pages too, so editors' previews don't count as visits.
+
+Keep the measurement ID off staging. The URL on a GA data stream doesn't filter anything: any page carrying the ID reports to the property.
+
+### 4. Give the build read access
+
+The staging build reads GA as a Google Cloud service account, using its JSON key.
+
+1. In the [Google Cloud console](https://console.cloud.google.com), create or pick a project. It doesn't need a billing account.
+2. Go to **APIs & Services → Library**, find **Google Analytics Data API**, and click **Enable**.
+3. Go to **IAM & Admin → Service Accounts → Create service account**, and give it a name such as `analytics-reader`. Skip the optional step that grants it access to the project.
+4. Open the service account, go to **Keys → Add key → Create new key → JSON**. A key file downloads.
+5. Copy the service account's email address (`<name>@<project>.iam.gserviceaccount.com`).
+6. In GA, go to **Admin → Property access management → + → Add users**. Paste the email, choose the **Viewer** role, and untick the email notification.
+
+The key file contains a private key, so treat it like a password. Never commit it. Store it in a password manager or delete it once it's in CloudCannon. If it leaks, delete it under the service account's **Keys** tab and create a new one. Viewer access means a leaked key can read this one property, but not change it.
+
+### 5. Point staging at GA
+
+1. Base64-encode the key, so it fits on one line:
+
+   ```bash
+   base64 -i key.json | pbcopy
+   ```
+
+2. On the staging site, go to **Site Settings → Build configuration → Environment Variables** and add:
+
+   | Key                 | Value                                  |
+   | ------------------- | -------------------------------------- |
+   | `ANALYTICS_ENABLED` | `true`                                 |
+   | `GA_PROPERTY_ID`    | The numeric property ID from step 2    |
+   | `GA_CREDENTIALS`    | The base64 key (raw JSON also works)   |
+
+3. Wait until GA has collected at least a day of data. A new property shows nothing for 24–48 hours.
+4. Rebuild staging.
+5. Open **Insights → Analytics** on the staging site. The dashboard shows real numbers and no **Mock data** badge. Then open any page in the Visual Editor and check that the pop-up appears in the bottom-left corner.
+
+With `ANALYTICS_ENABLED` set but either GA variable missing, the build uses generated mock data and labels it **Mock data**.
+
+If staging was branched from production, it copied production's environment variables. Remove `GA_MEASUREMENT_ID` from staging. Do the same in reverse if production was branched from staging.
+
+### Environment variable reference
+
+| Key                 | Site       | Secret | Purpose                                     |
+| ------------------- | ---------- | ------ | ------------------------------------------- |
+| `GA_MEASUREMENT_ID` | Production | No     | Adds the gtag tracking snippet              |
+| `ANALYTICS_ENABLED` | Staging    | No     | Builds `/analytics/` and the pop-up's data  |
+| `GA_PROPERTY_ID`    | Staging    | No     | The GA4 property the build reads            |
+| `GA_CREDENTIALS`    | Staging    | Yes    | Service account key the build signs in with |
+
+The measurement ID is public by design: the tag can't work without it in the page source, and it can only send data in, not read it out. Only `GA_CREDENTIALS` is secret.
+
+## Adding it to your own site
+
+The site around the analytics is a minimal Astro starter, so the analytics pieces are easy to lift out. For an Astro site:
+
+1. Install the GA4 Data API client:
+
+   ```bash
+   npm install @google-analytics/data
+   ```
+
+2. Copy `src/lib/analytics.ts`, `src/pages/analytics/` and `src/scripts/analytics-panel.ts`.
+3. Copy the `env.schema` block from `astro.config.mjs`.
+4. In your base layout, copy two things from `src/layouts/Layout.astro`: the `analytics-panel.ts` import inside the `window.inEditorMode` check, and the `GA_MEASUREMENT_ID` gtag snippet in `<head>`.
+5. Copy the `analytics` collection and its `collection_groups` entry from `cloudcannon.config.yml`, and the stub file `analytics/index.md`.
+6. Adjust two things to your site:
+   - `sitePaths()` in `src/lib/analytics.ts` lists page URLs for the mock data from this site's `pages` and `blog` collections. Point it at your own collections.
+   - The dashboard page uses this site's `Layout.astro` and Tailwind classes. Swap in your own layout and styles.
+
+`analytics-panel.ts` is framework-free and styles itself inside a shadow root, so it works unchanged on any site. On another static site generator, keep the same shape: a build step that writes `/analytics/pages.json` and the dashboard page only when `ANALYTICS_ENABLED` is set, and the pop-up script loaded behind `window.inEditorMode`.
+
+## Running it locally
 
 ```bash
 npm install
-npm run dev
+ANALYTICS_ENABLED=true npm run dev
 ```
 
-Your site is available at [localhost:4321](http://localhost:4321).
+The dashboard is at [localhost:4321/analytics/](http://localhost:4321/analytics/), with mock data. To use real data, put the staging variables in a `.env` file (gitignored) instead.
 
-### Editing Locally with CloudCannon
-
-Run CloudCannon against your local files with the [CloudCannon CLI](https://cloudcannon.com/documentation/developer-reference/cli/)
-dev server. This is the fastest way to iterate on `cloudcannon.config.yml`, inputs, structures, and editable
-regions — you see the editing experience without committing and pushing first.
-
-1. Install the CLI and log in (requires Node.js 24+):
-
-   ```bash
-   npm install --global @cloudcannon/cli
-   cloudcannon login
-   ```
-
-2. Build the site, so the dev server has output to serve:
-
-   ```bash
-   npm run build
-   ```
-
-3. Start CloudCannon locally, pointing it at the build output:
-
-   ```bash
-   cloudcannon dev dist
-   ```
-
-The dev server runs on port `10101` by default and opens CloudCannon in your browser, pointed at the
-files in this repo. Content edits sync to disk as you make them; re-run `npm run build` after changing
-components or templates to refresh the preview.
-
-Before you commit configuration changes, validate them:
+The pop-up only loads in the Visual Editor. To see it locally, build the site and run it in CloudCannon with the [CloudCannon CLI](https://cloudcannon.com/documentation/developer-reference/cli/) (Node.js 24+):
 
 ```bash
-cloudcannon validate
-```
-
-The dev server is a development tool only — editors never access it. See
-[Build your editing experience locally](https://cloudcannon.com/blog/build-your-editing-experience-locally-with-the-cloudcannon-dev-server/)
-for the full workflow.
-
-### AI Agent Skills
-
-If you build with an AI coding agent (Claude Code, Cursor, Copilot, and others), install
-[CloudCannon's agent skills](https://github.com/CloudCannon/agent-skills). They teach your agent how CloudCannon
-configuration, editable regions, and snippets actually work, so it stops guessing.
-
-```bash
-npx skills add cloudcannon/agent-skills --all
-```
-
-To see what's on offer before installing anything, or to install a subset:
-
-```bash
-npx skills add cloudcannon/agent-skills --list
-npx skills add cloudcannon/agent-skills --skill <names>
-```
-
-Other useful flags and commands:
-
-| Command                           | What it does                                                  |
-| --------------------------------- | ------------------------------------------------------------- |
-| `--all`                           | Install every skill for every detected agent, without prompts |
-| `-l`, `--list`                    | List the skills in the repository without installing          |
-| `-g`, `--global`                  | Install for your user account instead of just this project    |
-| `npx skills ls`                   | List the skills you have installed, project and global        |
-| `npx skills update`               | Update installed skills to their latest versions              |
-| `npx skills remove`               | Remove installed skills                                       |
-| `npx skills experimental_install` | Restore the exact skills recorded in `skills-lock.json`       |
-
-Skills install to `.agents/skills/`, with agent-specific directories such as `.claude/skills/` and `agent/skills/`
-pointing at them. Those directories are gitignored, but `skills-lock.json` is committed — so a teammate can restore
-the same set and versions you used.
-
-In Claude Code you can install them as a plugin instead:
-
-```
-/plugin marketplace add CloudCannon/agent-skills
-/plugin install agent-skills@cloudcannon
-```
-
-## CloudCannon Setup
-
-This site is pre-configured for CloudCannon. Connect your repository and CloudCannon will detect the configuration in `.cloudcannon/initial-site-settings.json` and build your site automatically. The editing experience is defined in `cloudcannon.config.yml`, which you can modify to control your editors' experience.
-
-### Editable Regions
-
-This starter demonstrates several types of Editable Region:
-
-- **Text** (`data-editable="text"`) for editing front matter text values inline
-- **Image** (`data-editable="image"`) for editing front matter image values
-- **Array** (`data-editable="array"`) for page-building with reorderable content blocks
-- **Source** (`data-editable="source"`) for making standalone `.astro` pages editable
-- **Component** (`<editable-component>`) for live re-rendering of Astro components
-
-Components that need live re-rendering are registered in `src/scripts/register-components.ts` and loaded conditionally when the site is open in CloudCannon's Visual Editor.
-
-#### Source Editables
-
-The About page (`src/content/pages/about.astro`) demonstrates **source editables** — a pattern where content lives directly in an Astro template rather than in Markdown front matter. Source editable regions use `data-editable="source"`, `data-path="path/to/file.astro"`, and `data-key` attributes. CloudCannon writes changes straight back to the `.astro` file.
-
-This is useful for standalone pages (like About or Contact) where a developer wants full control over the markup while still giving editors visual editing access — **and where page building with components is *not* desired**. No accompanying Markdown file or front matter schema is needed. A thin routing wrapper in `src/pages/about.astro` handles Astro's file-based routing.
-
-### Components
-
-Three page-building components are included:
-
-- **Hero** — heading, subheading, image, and optional button
-- **LeftRight** — side-by-side text and image, with optional flip and button
-- **TextBlock** — heading and rich text content
-
-### Content
-
-- **Pages** are in `src/content/pages/` as Markdown with structured front matter, and support a component-based page-building workflow. Developers can also add standalone pages paired with a routing file in `src/pages/` (like `src/content/pages/about.astro`), and decide which parts of those pages are editable in CloudCannon.
-- **Blog posts** are in `src/content/blog/` as MDX files
-- **Data** files (site settings, navigation) are in `data/`
-
-## Analytics in the Visual Editor (PoC)
-
-Editors see site analytics inside CloudCannon in two places. Customers never see either.
-
-- **Per-page pop-up**: a collapsible panel in the bottom-left corner of every page opened in the Visual Editor. It shows that page's views, users, engagement, bounce rate, a daily trend and top sources.
-- **Dashboard**: `/analytics/`, opened from **Insights → Analytics** in the CloudCannon sidebar. It shows site totals, a daily trend, top pages, channels, devices and a table of every page.
-
-### How it works
-
-CloudCannon environment variables exist only during the build. The Visual Editor API has no way to read them, and CloudCannon hosting runs no server-side code. So the analytics token is used at build time and never reaches the browser:
-
-1. When `ANALYTICS_ENABLED` is set, the build fetches a 28-day GA4 snapshot (`src/lib/analytics.ts`).
-2. The build writes the snapshot as the `/analytics/` page and `/analytics/pages.json`. Both contain aggregated numbers only.
-3. `src/scripts/analytics-panel.ts` loads only when `window.inEditorMode` is set. It reads `/analytics/pages.json` and renders the pop-up for the current path. If the file is missing, it renders nothing.
-4. Without `ANALYTICS_ENABLED`, the build emits neither file, and `/analytics/` returns a 404.
-
-Data is as fresh as the last build. Rebuild the staging site to refresh it.
-
-### Tracking
-
-When `GA_MEASUREMENT_ID` is set, `src/layouts/Layout.astro` adds the GA4 gtag snippet. Set it on the production site only (**Site Settings → Build configuration → Environment Variables**), with the `G-` ID from the GA4 web data stream. The snippet skips the Visual Editor, which can load production pages too.
-
-The URL on the GA data stream doesn't filter traffic: any page carrying the measurement ID reports to the property. Keeping the ID off staging is what keeps staging visits out of the numbers.
-
-### Environment variables
-
-Set these on the staging site only, in **Site Settings → Build configuration → Environment Variables**:
-
-| Key | Value |
-| --- | --- |
-| `ANALYTICS_ENABLED` | `true` |
-| `GA_PROPERTY_ID` | The numeric GA4 property ID |
-| `GA_CREDENTIALS` | A Google Cloud service account's JSON key, raw or base64 (`base64 -i key.json`) |
-
-The service account needs the **Viewer** role on the GA4 property (**GA Admin → Property access management**), and the Google Analytics Data API enabled in its Cloud project. With `ANALYTICS_ENABLED` set but no credentials, the build uses mock data and labels it "Mock data".
-
-To try it locally with mock data:
-
-```bash
+npm install --global @cloudcannon/cli
+cloudcannon login
 ANALYTICS_ENABLED=true npm run build
+cloudcannon dev dist
 ```
 
-### CloudCannon setup
+## Troubleshooting
 
-- **Staging site:** set the environment variables above, and protect the whole site in **Site Settings → Authentication** (CloudCannon or Password).
-- **Production site:** `GA_MEASUREMENT_ID` only. A site branched from staging copies its configuration, so remove the staging variables there.
+- **Dashboard shows "Mock data" on staging:** `GA_PROPERTY_ID` or `GA_CREDENTIALS` is missing from the staging site. The build log says `[analytics] GA_PROPERTY_ID or GA_CREDENTIALS not set, using mock data`.
+- **Staging build fails with a permission error:** the service account isn't a Viewer on the property, or `GA_PROPERTY_ID` holds the `G-` measurement ID instead of the numeric property ID.
+- **Staging build fails saying the API is disabled or hasn't been used:** enable the Google Analytics Data API in the service account's Cloud project.
+- **Staging build fails parsing credentials:** `GA_CREDENTIALS` was cut short or changed when pasted. Re-copy the base64 output in full.
+- **Can't create a service account key:** your Google Cloud organisation has a policy blocking service account keys. Ask an organisation admin to allow it for the project, or use a project outside the organisation.
+- **Dashboard shows zeros:** the property is new, or production has no `GA_MEASUREMENT_ID`. Check **Reports → Realtime** in GA, then rebuild staging a day later.
+- **No pop-up in the Visual Editor:** `/analytics/pages.json` doesn't exist on that site. The browser console logs `[analytics] /analytics/pages.json returned 404`. Set `ANALYTICS_ENABLED` and rebuild.
+- **`/analytics/` is public:** turn on authentication for the staging site (step 1).
 
-The **Insights → Analytics** sidebar entry also appears on production, because `cloudcannon.config.yml` is shared across branches. There it opens a 404.
+## Costs and limits
 
-## Project Structure
-
-```
-├── .cloudcannon/          # CloudCannon schemas and postbuild
-├── cloudcannon.config.yml # CloudCannon configuration
-├── data/                  # Site-wide data files
-├── public/                # Static assets
-└── src/
-    ├── components/        # Astro components
-    ├── content/           # Content collections (pages, blog)
-    ├── layouts/           # Page layouts
-    ├── pages/             # Astro page routes
-    ├── scripts/           # Component registration for visual editing
-    └── styles/            # Global CSS (Tailwind v4)
-```
-
-## Learn More
-
-- [CloudCannon documentation](https://cloudcannon.com/documentation/) — configuration, editing, and build reference
-- [CloudCannon CLI reference](https://cloudcannon.com/documentation/developer-reference/cli/) — `cloudcannon dev`, `validate`, and more
-- [CloudCannon agent skills](https://github.com/CloudCannon/agent-skills) — skills for working on CloudCannon sites with AI agents
+- Standard GA4 and the GA4 Data API are free. The Data API has daily quotas per property instead of billing, and each staging build makes six requests. Only calls signed with your service account key count toward the quota.
+- Any site can send hits with your measurement ID, which adds junk to the data but can't cost money. Every hit records the domain it came from in the `hostName` dimension, which you can filter on in GA reports.
+- The data only refreshes when staging rebuilds.
+- The **Insights → Analytics** sidebar entry also appears on production, because `cloudcannon.config.yml` is shared across branches. There it opens a 404.
