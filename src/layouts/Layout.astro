@@ -5,6 +5,7 @@ import site from "../../data/site.json";
 import Header from "../components/navigation/header.astro";
 import Footer from "../components/navigation/footer.astro";
 import { SEO } from "astro-seo";
+import { GA_MEASUREMENT_ID } from "astro:env/server";
 
 export interface SEOProps {
   page_description: string | null;
@@ -70,6 +71,23 @@ const canonicalURL = new URL(seo?.canonical_url ?? Astro.url.pathname, baseUrl);
         card: "summary_large_image",
       }}
     />
+    {GA_MEASUREMENT_ID && (
+      <script is:inline define:vars={{ measurementId: GA_MEASUREMENT_ID }}>
+        // The Visual Editor loads production pages too; editor previews would count as visits.
+        if (!window.inEditorMode) {
+          window.dataLayer = window.dataLayer || [];
+          window.gtag = function () {
+            window.dataLayer.push(arguments);
+          };
+          window.gtag("js", new Date());
+          window.gtag("config", measurementId);
+          const tag = document.createElement("script");
+          tag.async = true;
+          tag.src = `https://www.googletagmanager.com/gtag/js?id=${measurementId}`;
+          document.head.append(tag);
+        }
+      </script>
+    )}
   </head>
   <body class="flex flex-col min-h-screen">
     <Header />
