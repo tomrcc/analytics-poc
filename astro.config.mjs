@@ -13,9 +13,11 @@ export default defineConfig({
     dangerouslyProcessSVG: true,
   },
   compressHTML: true,
-  // Set only on the staging site. Without ANALYTICS_ENABLED no analytics output is built.
   env: {
     schema: {
+      // Set only on the production site, so staging traffic never reaches GA.
+      GA_MEASUREMENT_ID: envField.string({ context: "server", access: "public", optional: true }),
+      // Set only on the staging site. Without ANALYTICS_ENABLED no analytics output is built.
       ANALYTICS_ENABLED: envField.boolean({ context: "server", access: "public", default: false }),
       GA_PROPERTY_ID: envField.string({ context: "server", access: "secret", optional: true }),
       // Service account JSON, raw or base64.

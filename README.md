@@ -167,6 +167,12 @@ CloudCannon environment variables exist only during the build. The Visual Editor
 
 Data is as fresh as the last build. Rebuild the staging site to refresh it.
 
+### Tracking
+
+When `GA_MEASUREMENT_ID` is set, `src/layouts/Layout.astro` adds the GA4 gtag snippet. Set it on the production site only (**Site Settings → Build configuration → Environment Variables**), with the `G-` ID from the GA4 web data stream. The snippet skips the Visual Editor, which can load production pages too.
+
+The URL on the GA data stream doesn't filter traffic: any page carrying the measurement ID reports to the property. Keeping the ID off staging is what keeps staging visits out of the numbers.
+
 ### Environment variables
 
 Set these on the staging site only, in **Site Settings → Build configuration → Environment Variables**:
@@ -188,7 +194,7 @@ ANALYTICS_ENABLED=true npm run build
 ### CloudCannon setup
 
 - **Staging site:** set the environment variables above, and protect the whole site in **Site Settings → Authentication** (CloudCannon or Password).
-- **Production site:** no analytics environment variables. A site branched from staging copies its configuration, so remove them there.
+- **Production site:** `GA_MEASUREMENT_ID` only. A site branched from staging copies its configuration, so remove the staging variables there.
 
 The **Insights → Analytics** sidebar entry also appears on production, because `cloudcannon.config.yml` is shared across branches. There it opens a 404.
 
