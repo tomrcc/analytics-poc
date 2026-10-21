@@ -90,7 +90,7 @@ The staging build reads GA as a Google Cloud service account, using its JSON key
 1. In the [Google Cloud console](https://console.cloud.google.com), create or pick a project. It doesn't need a billing account.
 2. Go to **APIs & Services → Library**, find **Google Analytics Data API**, and click **Enable**.
 3. Go to **IAM & Admin → Service Accounts → Create service account**, and give it a name such as `analytics-reader`. Skip the optional step that grants it access to the project.
-4. Open the service account, go to **Keys → Add key → Create new key → JSON**. A key file downloads.
+4. Open the service account, go to **Keys → Add key → Create new key → JSON**. A key file downloads. Leave it outside the repository, for example in `~/Downloads`.
 5. Copy the service account's email address (`<name>@<project>.iam.gserviceaccount.com`).
 6. In GA, go to **Admin → Property access management → + → Add users**. Paste the email, choose the **Viewer** role, and untick the email notification.
 
@@ -101,7 +101,7 @@ The key file contains a private key, so treat it like a password. Never commit i
 1. Base64-encode the key, so it fits on one line:
 
    ```bash
-   base64 -i key.json | pbcopy
+   base64 -i ~/Downloads/<key-file>.json | pbcopy
    ```
 
 2. On the staging site, go to **Site Settings → Build configuration → Environment Variables** and add:
@@ -118,18 +118,25 @@ The key file contains a private key, so treat it like a password. Never commit i
 
 With `ANALYTICS_ENABLED` set but either GA variable missing, the build uses generated mock data and labels it **Mock data**.
 
-If staging was branched from production, it copied production's environment variables. Remove `GA_MEASUREMENT_ID` from staging. Do the same in reverse if production was branched from staging.
+A site branched or duplicated from another copies its environment variables. Check each site has only its own:
+
+- **Production:** `GA_MEASUREMENT_ID` only. If production keeps the staging variables, it publishes the dashboard and `pages.json` with no login.
+- **Staging:** `ANALYTICS_ENABLED`, `GA_PROPERTY_ID` and `GA_CREDENTIALS` only.
+
+A build with both `ANALYTICS_ENABLED` and `GA_MEASUREMENT_ID` set fails on purpose, since that combination means the analytics pages are about to be built on production.
 
 ### Environment variable reference
 
-| Key                 | Site       | Secret | Purpose                                     |
-| ------------------- | ---------- | ------ | ------------------------------------------- |
-| `GA_MEASUREMENT_ID` | Production | No     | Adds the gtag tracking snippet              |
-| `ANALYTICS_ENABLED` | Staging    | No     | Builds `/analytics/` and the pop-up's data  |
-| `GA_PROPERTY_ID`    | Staging    | No     | The GA4 property the build reads            |
-| `GA_CREDENTIALS`    | Staging    | Yes    | Service account key the build signs in with |
+| Key                 | Site       | In the built site | Purpose                                     |
+| ------------------- | ---------- | ----------------- | ------------------------------------------- |
+| `GA_MEASUREMENT_ID` | Production | Yes               | Adds the gtag tracking snippet              |
+| `ANALYTICS_ENABLED` | Staging    | No                | Builds `/analytics/` and the pop-up's data  |
+| `GA_PROPERTY_ID`    | Staging    | No                | The GA4 property the build reads            |
+| `GA_CREDENTIALS`    | Staging    | No                | Service account key the build signs in with |
 
-The measurement ID is public by design: the tag can't work without it in the page source, and it can only send data in, not read it out. Only `GA_CREDENTIALS` is secret.
+The measurement ID is public by design: the tag can't work without it in the page source, and it can only send data in, not read it out.
+
+`GA_CREDENTIALS` is the only real secret. `astro.config.mjs` declares both it and `GA_PROPERTY_ID` with `access: "secret"`, so Astro reads them at build time and never writes them into the built site.
 
 ## Adding it to your own site
 
@@ -172,9 +179,11 @@ cloudcannon dev dist
 ## Troubleshooting
 
 - **Dashboard shows "Mock data" on staging:** `GA_PROPERTY_ID` or `GA_CREDENTIALS` is missing from the staging site. The build log says `[analytics] GA_PROPERTY_ID or GA_CREDENTIALS not set, using mock data`.
-- **Staging build fails with a permission error:** the service account isn't a Viewer on the property, or `GA_PROPERTY_ID` holds the `G-` measurement ID instead of the numeric property ID.
-- **Staging build fails saying the API is disabled or hasn't been used:** enable the Google Analytics Data API in the service account's Cloud project.
-- **Staging build fails parsing credentials:** `GA_CREDENTIALS` was cut short or changed when pasted. Re-copy the base64 output in full.
+- **Build fails with `ANALYTICS_ENABLED and GA_MEASUREMENT_ID are both set`:** one site has both production and staging variables. Remove the ones that belong to the other site (step 5).
+- **Staging build fails with `GA4 request failed: gRPC 7: …`:** a permission error. The service account isn't a Viewer on the property, or `GA_PROPERTY_ID` holds the `G-` measurement ID instead of the numeric property ID.
+- **Staging build fails with a `GA4 request failed` message saying the API is disabled or hasn't been used:** enable the Google Analytics Data API in the service account's Cloud project.
+- **Staging build fails with `GA_CREDENTIALS is not valid service account JSON` or `is missing client_email or private_key`:** the key was cut short or changed when pasted. Re-copy the base64 output in full.
+- **Staging build fails with `the Google client failed before reaching the API`:** the key parsed, but signing in failed. Usually the key was deleted or isn't a valid private key; a network failure during the build gives the same message. Rebuild once, then create a new key if it persists (step 4). The log leaves out the underlying error, because it can quote the key.
 - **Can't create a service account key:** your Google Cloud organisation has a policy blocking service account keys. Ask an organisation admin to allow it for the project, or use a project outside the organisation.
 - **Dashboard shows zeros:** the property is new, or production has no `GA_MEASUREMENT_ID`. Check **Reports → Realtime** in GA, then rebuild staging a day later.
 - **No pop-up in the Visual Editor:** `/analytics/pages.json` doesn't exist on that site. The browser console logs `[analytics] /analytics/pages.json returned 404`. Set `ANALYTICS_ENABLED` and rebuild.
