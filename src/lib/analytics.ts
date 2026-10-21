@@ -1,4 +1,4 @@
-import { ANALYTICS_ENABLED, getSecret } from "astro:env/server";
+import { ANALYTICS_ENABLED, GA_MEASUREMENT_ID, getSecret } from "astro:env/server";
 import { getCollection } from "astro:content";
 
 const RANGE_DAYS = 28;
@@ -34,7 +34,24 @@ export interface AnalyticsReport {
 }
 
 export function isAnalyticsEnabled(): boolean {
-  return ANALYTICS_ENABLED === true;
+  if (ANALYTICS_ENABLED !== true) return false;
+  // The tracking ID marks a production site, where analytics output would be public.
+  if (GA_MEASUREMENT_ID) {
+    throw new Error(
+      "[analytics] ANALYTICS_ENABLED and GA_MEASUREMENT_ID are both set. Analytics pages belong on the staging site only, and the tracking ID on production only.",
+    );
+  }
+  return true;
+}
+
+// GA page paths come from anyone who sends hits with the public measurement ID, so only same-site paths become links.
+export function isSitePath(path: string): boolean {
+  const base = "https://site.invalid";
+  try {
+    return new URL(path, base).origin === base;
+  } catch {
+    return false;
+  }
 }
 
 let reportPromise: Promise<AnalyticsReport> | undefined;
@@ -49,7 +66,12 @@ async function buildReport(): Promise<AnalyticsReport> {
   const propertyId = getSecret("GA_PROPERTY_ID");
   const credentials = getSecret("GA_CREDENTIALS");
   if (propertyId && credentials) {
-    return fetchGa4Report(propertyId, parseCredentials(credentials));
+    const parsed = parseCredentials(credentials);
+    try {
+      return await fetchGa4Report(propertyId, parsed);
+    } catch (error) {
+      throw new Error(`[analytics] GA4 request failed: ${safeErrorMessage(error)}`);
+    }
   }
   console.warn("[analytics] GA_PROPERTY_ID or GA_CREDENTIALS not set, using mock data");
   return buildMockReport();
@@ -76,10 +98,27 @@ function dateRange() {
   return { start: days[0], end: days[days.length - 1], days };
 }
 
+// Errors from parsing or the Google client can quote their input, so none of their text reaches the build log.
 function parseCredentials(raw: string): { client_email: string; private_key: string } {
-  const json = raw.trim().startsWith("{") ? raw : Buffer.from(raw, "base64").toString("utf8");
-  const parsed = JSON.parse(json);
+  let parsed: { client_email?: unknown; private_key?: unknown };
+  try {
+    const json = raw.trim().startsWith("{") ? raw : Buffer.from(raw, "base64").toString("utf8");
+    parsed = JSON.parse(json);
+  } catch {
+    throw new Error("[analytics] GA_CREDENTIALS is not valid service account JSON, raw or base64");
+  }
+  if (typeof parsed.client_email !== "string" || typeof parsed.private_key !== "string") {
+    throw new Error("[analytics] GA_CREDENTIALS is missing client_email or private_key");
+  }
   return { client_email: parsed.client_email, private_key: parsed.private_key };
+}
+
+// Details from Google's servers are safe to log, since the server never sees the private key.
+// Local sign-in failures arrive as gRPC 2 (UNKNOWN) with the client's own error text, so those are replaced.
+function safeErrorMessage(error: unknown): string {
+  const { code, details } = (error ?? {}) as { code?: unknown; details?: unknown };
+  if (typeof code === "number" && code !== 2 && typeof details === "string") return `gRPC ${code}: ${details}`;
+  return "the Google client failed before reaching the API (check GA_CREDENTIALS)";
 }
 
 function topN(map: Map<string, number>, n: number): NamedValue[] {

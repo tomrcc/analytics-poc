@@ -1,6 +1,6 @@
 ---
 import Layout from "../../layouts/Layout.astro";
-import { getAnalyticsReport, isAnalyticsEnabled, type NamedValue } from "../../lib/analytics";
+import { getAnalyticsReport, isAnalyticsEnabled, isSitePath, type NamedValue } from "../../lib/analytics";
 
 // Builds /analytics/ only when analytics is enabled, so prod has no page at all.
 export function getStaticPaths() {
@@ -127,7 +127,7 @@ const barLists = [
               {list.items.map((item) => (
                 <li>
                   <div class="flex justify-between gap-3 text-sm">
-                    {list.link ? (
+                    {list.link && isSitePath(item.name) ? (
                       <a class="truncate text-gray-800 underline-offset-2 hover:underline" href={item.name}>{item.name}</a>
                     ) : (
                       <span class="truncate capitalize text-gray-800">{item.name}</span>
@@ -159,7 +159,9 @@ const barLists = [
           <tbody class="tabular-nums">
             {pageRows.map((p) => (
               <tr class="border-b border-gray-100">
-                <td class="py-2 pr-4"><a class="underline-offset-2 hover:underline" href={p.path}>{p.path}</a></td>
+                <td class="py-2 pr-4">
+                  {isSitePath(p.path) ? <a class="underline-offset-2 hover:underline" href={p.path}>{p.path}</a> : p.path}
+                </td>
                 <td class="py-2 pr-4 text-right">{whole.format(p.views)}</td>
                 <td class="py-2 pr-4 text-right">{whole.format(p.users)}</td>
                 <td class="py-2 pr-4 text-right">{duration(p.engagementSeconds)}</td>
